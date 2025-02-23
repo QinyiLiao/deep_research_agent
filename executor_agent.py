@@ -35,11 +35,11 @@ def save_prompt_to_file(messages: List[Dict[str, str]], round_time: str = None, 
     """Save prompt messages to a file for debugging."""
     if not os.path.exists('prompts'):
         os.makedirs('prompts')
-    
+
     # Generate timestamp at save time if not provided
     if round_time is None:
         round_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
     filename = f"prompts/{round_time}_{prefix}_prompt.txt"
     with open(filename, 'w', encoding='utf-8') as f:
         for msg in messages:
@@ -53,11 +53,11 @@ def save_response_to_file(response: str, tool_calls: List[Dict] = None, round_ti
     """Save response and tool calls to a file for debugging."""
     if not os.path.exists('prompts'):
         os.makedirs('prompts')
-    
+
     # Generate timestamp at save time if not provided
     if round_time is None:
         round_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
     filename = f"prompts/{round_time}_{prefix}_response.txt"
     with open(filename, 'w', encoding='utf-8') as f:
         f.write("=== Response ===\n")
@@ -80,7 +80,7 @@ def log_usage(usage: Dict[str, int], thinking_time: float, step_name: str, model
         cached_tokens=cached_tokens,
         model=model
     )
-    
+
     logger.info(f"\n{step_name} Token Usage:")
     logger.info(f"Input tokens: {usage['prompt_tokens']:,}")
     logger.info(f"Output tokens: {usage['completion_tokens']:,}")
@@ -88,7 +88,7 @@ def log_usage(usage: Dict[str, int], thinking_time: float, step_name: str, model
     logger.info(f"Total tokens: {usage['total_tokens']:,}")
     logger.info(f"Total cost: ${cost:.6f}")
     logger.info(f"Thinking time: {thinking_time:.2f}s")
-    
+
     # Update the usage dict with the new cost
     usage['total_cost'] = cost
 
@@ -97,21 +97,21 @@ class ExecutorAgent:
     Executor agent that performs concrete tasks based on Planner's instructions.
     Reads from .executorrules for system prompt.
     """
-    
+
     def __init__(self, model: str):
         """Initialize the Executor agent.
-        
+
         Args:
             model: The OpenAI model to use
         """
         self.model = model
         self.system_prompt = self._load_system_prompt()
-        
+
     def _load_system_prompt(self) -> str:
         """Load system prompt from .executorrules file."""
         today = datetime.now().strftime("%Y-%m-%d")
         today_prompt = f"""You are the Executor agent in a multi-agent research system. Today's date is {today}. Take this into consideration when you search for and analyze information."""
-        
+
         if os.path.exists('.executorrules'):
             with open('.executorrules', 'r', encoding='utf-8') as f:
                 content = f.read().strip()
@@ -140,42 +140,42 @@ class ExecutorAgent:
         messages = [
             {"role": "user", "content": self.system_prompt},
         ]
-        
+
         # Add file contents and task context
         file_contents = self._load_file_contents(context)
-            
+
         # Build context message
         context_message = "\nRelevant Files:\n"
-        
+
         # Add all files including scratchpad.md
         if file_contents:
             for filename, content in file_contents.items():
                 context_message += f"\n--- {filename} ---\n{content}\n"
-        
+
         # Add available files list
         context_message += f"\nAvailable Files: {', '.join(context.created_files)}\n"
-        
+
         messages.append({"role": "user", "content": context_message})
         return messages
 
     def execute(self, context: ExecutorContext) -> str:
         """Execute task based on instructions."""
         logger.info("=== Starting Executor execution ===")
-        
+
         # Store the context
         self.context = context
-        
+
         messages = self._build_prompt(context)
-        
+
         # Save prompt if debug mode is enabled
         if context.debug:
             save_prompt_to_file(messages)
-        
+
         try:
             while True:  # Loop to handle chained tool calls
                 # Start timer
                 start_time = time.time()
-                
+
                 logger.debug("Calling chat completion")
                 chat_completion_args = {
                     "messages": messages,
@@ -183,20 +183,20 @@ class ExecutorAgent:
                     "functions": function_definitions,
                     "function_call": "auto"
                 }
-                
+
                 # Add reasoning_effort for models starting with 'o'
                 if self.model.startswith('o'):
                     chat_completion_args["reasoning_effort"] = 'high'
-                
+
                 response = chat_completion.chat_completion(**chat_completion_args)
-                
+
                 # Calculate thinking time and token usage
                 thinking_time = time.time() - start_time
                 usage = chat_completion.get_token_usage()
-                
+
                 # Log usage statistics
                 log_usage(usage, thinking_time, "Step", self.model)
-                
+
                 # Update the context's total usage
                 if not context.total_usage:
                     context.total_usage = TokenUsage(
@@ -210,10 +210,10 @@ class ExecutorAgent:
                 else:
                     # Just use the current round's usage directly from chat_completion
                     context.total_usage = chat_completion.token_tracker.get_total_usage()
-                
+
                 message = response.choices[0].message
                 logger.debug(f"Received response type: {'content' if message.content else 'tool call'}")
-                
+
                 # Log the actual response content
                 if message.content:
                     logger.info(f"Executor Response Content:\n{message.content}")
@@ -222,15 +222,15 @@ class ExecutorAgent:
                         logger.info(f"Executor Tool Call:\nName: {tool_call.function.name}\nArguments: {tool_call.function.arguments}")
                 elif hasattr(message, 'function_call') and message.function_call:
                     logger.info(f"Executor Function Call:\nName: {message.function_call.name}\nArguments: {message.function_call.arguments}")
-                
+
                 # Save response if debug mode is enabled
                 if context.debug:
                     tool_calls = []
                     if hasattr(message, 'tool_calls') and message.tool_calls:
-                        tool_calls = [{'name': tc.function.name, 'arguments': json.loads(tc.function.arguments)} 
+                        tool_calls = [{'name': tc.function.name, 'arguments': json.loads(tc.function.arguments)}
                                     for tc in message.tool_calls]
                     elif hasattr(message, 'function_call') and message.function_call:
-                        tool_calls = [{'name': message.function_call.name, 
+                        tool_calls = [{'name': message.function_call.name,
                                      'arguments': json.loads(message.function_call.arguments)}]
                     save_response_to_file(message.content or "", tool_calls)
 
@@ -253,7 +253,7 @@ class ExecutorAgent:
                     logger.info(f"Function call detected - Function: {func_name}")
                     logger.debug(f"Function arguments: {json.dumps(arguments, ensure_ascii=False)}")
                     has_tool_call = True
-                
+
                 if has_tool_call:
                     # Execute the tool
                     logger.info(f"Executing tool: {func_name}")
@@ -261,7 +261,7 @@ class ExecutorAgent:
                     tool_result = self._execute_tool(func_name, arguments)
                     tool_execution_time = time.time() - start_time
                     logger.info(f"Tool execution completed in {tool_execution_time:.2f}s")
-                    
+
                     # Add tool result to conversation
                     messages.append({
                         "role": "assistant",
@@ -279,18 +279,18 @@ class ExecutorAgent:
                         "content": f"Function {func_name} returned: {tool_result}"
                     })
                     logger.info("Added tool result to conversation history")
-                    
+
                     # Continue the loop to get model's interpretation of the result
                     continue
                 else:
                     # No more tool calls, return the final response
                     logger.info("No tool calls detected, returning final response")
                     return message.content or "Task completed successfully"
-            
+
         except Exception as e:
             logger.error(f"Error during execution: {e}", exc_info=True)
             return f"Error during execution: {str(e)}"
-            
+
     def _execute_tool(self, func_name: str, arguments: Dict) -> Optional[str]:
         """Execute a tool with given name and arguments."""
         try:
@@ -325,19 +325,19 @@ class ExecutorAgent:
             elif func_name == "execute_command":
                 command = arguments.get("command")
                 explanation = arguments.get("explanation")
-                
+
                 if not command:
                     result = "Error: No command provided"
                     logger.error("Command execution failed: no command provided")
                 else:
                     logger.info(f"Preparing to execute command: {command}")
                     logger.info(f"Command explanation: {explanation}")
-                    
+
                     # Ask for user confirmation
                     print(f"\nConfirm execution of command: {command}")
                     print(f"Explanation: {explanation}")
                     confirmation = input("[y/N]: ").strip().lower()
-                    
+
                     if confirmation != 'y':
                         result = "Command execution cancelled by user"
                         logger.info("Command execution cancelled by user")
@@ -369,15 +369,15 @@ class ExecutorAgent:
                 error_msg = f"Unknown function: {func_name}"
                 logger.error(error_msg)
                 result = error_msg
-            
+
             # Log the result size for all tools
             if result:
                 result_size = len(result)
                 logger.info(f"Tool {func_name} completed with result size: {result_size} chars")
-            
+
             return result
-            
+
         except Exception as e:
             error_msg = f"Error executing tool {func_name}: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            return error_msg 
+            return error_msg

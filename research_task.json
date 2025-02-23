@@ -1,0 +1,6 @@
+{
+    "query": "write a report about Chatgpt-o1",
+    "report_name": "Chatgpt-o1_report",
+    "planner_model": "gpt-4o",
+    "executor_model": "o3-mini"
+}
